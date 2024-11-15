@@ -26,6 +26,7 @@ use crate::{Error, Protocol, PublicKey};
 use bytes::{Bytes, BytesMut};
 use futures::prelude::*;
 use futures::ready;
+use hswp as snow;
 use log::{debug, trace};
 use std::{
     fmt, io,
@@ -110,6 +111,14 @@ impl<T> NoiseFramed<T, snow::HandshakeState> {
         };
 
         Ok((dh_remote_pubkey, Output::new(io)))
+    }
+
+    pub(crate) async fn enc_key(&mut self) -> Result<(), snow::Error> {
+        self.session.enc_key().await
+    }
+
+    pub(crate) async fn dec_key(&mut self) -> Result<(), snow::Error> {
+        self.session.dec_key().await
     }
 }
 

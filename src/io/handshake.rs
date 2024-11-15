@@ -33,6 +33,7 @@ use crate::Error;
 use crate::LegacyConfig;
 use bytes::Bytes;
 use futures::prelude::*;
+use hswp as snow;
 use libp2p_identity as identity;
 use quick_protobuf::{BytesReader, MessageRead, MessageWrite, Writer};
 use std::io;
@@ -229,6 +230,22 @@ where
         state.dh_remote_pubkey_sig = Some(pb.identity_sig);
     }
 
+    Ok(())
+}
+
+pub(crate) async fn enc_key<T>(state: &mut State<T>) -> Result<(), Error>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    state.io.enc_key().await?;
+    Ok(())
+}
+
+pub(crate) async fn dec_key<T>(state: &mut State<T>) -> Result<(), Error>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    state.io.dec_key().await?;
     Ok(())
 }
 

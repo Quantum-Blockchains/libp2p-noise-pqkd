@@ -64,6 +64,20 @@ pub use io::Output;
 
 pub use protocol::Protocol;
 
+#[macro_export]
+macro_rules! test {
+    ($($x:expr)+) => {
+        $(
+            println!("\x1b[93m{}\x1b[0m", $x);
+        )+
+    };
+    ($($x:expr, $y:expr)+) => {
+        $(
+            println!("\x1b[93m{}: \x1b[0m\x1b[96m{:?}\x1b[0m", $x, $y);
+        )+
+    };
+}
+
 #[deprecated(
     note = "This type will be made private in the future. Use `libp2p_noise::Config::new` instead to use the noise protocol."
 )]
@@ -150,9 +164,13 @@ pub struct Config {
 impl Config {
     /// Construct a new configuration for the noise handshake using the XX handshake pattern.
 
-    pub fn new(identity: &identity::Keypair) -> Result<Self, Error> {
+    pub fn new(
+        identity: &identity::Keypair,
+        sae_id_pqkd: &str,
+        addr_pqkd: &str,
+    ) -> Result<Self, Error> {
         Ok(Config {
-            inner: NoiseAuthenticated::xx(identity)?,
+            inner: NoiseAuthenticated::xx(identity, sae_id_pqkd, addr_pqkd)?,
         })
     }
 
@@ -220,6 +238,8 @@ pub struct NoiseConfig<P, C: Zeroize, R = ()> {
     ///
     /// For further information, see <https://noiseprotocol.org/noise.html#prologue>.
     prologue: Vec<u8>,
+    sae_id_pqkd: String,
+    addr_pqkd: String,
 }
 
 impl<H, C: Zeroize, R> NoiseConfig<H, C, R> {
@@ -257,7 +277,13 @@ where
     fn into_responder<S>(self, socket: S) -> Result<State<S>, Error> {
         let session = self
             .params
-            .into_builder(&self.prologue, self.dh_keys.keypair.secret(), None)
+            .into_builder(
+                &self.prologue,
+                self.dh_keys.keypair.secret(),
+                None,
+                &self.sae_id_pqkd,
+                &self.addr_pqkd,
+            )
             .build_responder()?;
 
         let state = State::new(socket, session, self.dh_keys.identity, None, self.legacy);
@@ -268,7 +294,13 @@ where
     fn into_initiator<S>(self, socket: S) -> Result<State<S>, Error> {
         let session = self
             .params
-            .into_builder(&self.prologue, self.dh_keys.keypair.secret(), None)
+            .into_builder(
+                &self.prologue,
+                self.dh_keys.keypair.secret(),
+                None,
+                &self.sae_id_pqkd,
+                &self.addr_pqkd,
+            )
             .build_initiator()?;
 
         let state = State::new(socket, session, self.dh_keys.identity, None, self.legacy);
@@ -290,6 +322,8 @@ where
             remote: (),
             _marker: std::marker::PhantomData,
             prologue: Vec::default(),
+            sae_id_pqkd: String::new(),
+            addr_pqkd: String::new(),
         }
     }
 }
@@ -299,7 +333,7 @@ where
     C: Protocol<C> + Zeroize,
 {
     /// Create a new `NoiseConfig` for the `XX` handshake pattern.
-    pub fn xx(dh_keys: AuthenticKeypair<C>) -> Self {
+    pub fn xx(dh_keys: AuthenticKeypair<C>, sae_id_pqkd: &str, addr_pqkd: &str) -> Self {
         NoiseConfig {
             dh_keys,
             params: C::params_xx(),
@@ -307,6 +341,8 @@ where
             remote: (),
             _marker: std::marker::PhantomData,
             prologue: Vec::default(),
+            sae_id_pqkd: String::from(sae_id_pqkd),
+            addr_pqkd: String::from(addr_pqkd),
         }
     }
 }
@@ -327,6 +363,8 @@ where
             remote: (),
             _marker: std::marker::PhantomData,
             prologue: Vec::default(),
+            sae_id_pqkd: String::new(),
+            addr_pqkd: String::new(),
         }
     }
 }
@@ -351,6 +389,8 @@ where
             remote: (remote_dh, remote_id),
             _marker: std::marker::PhantomData,
             prologue: Vec::default(),
+            sae_id_pqkd: String::new(),
+            addr_pqkd: String::new(),
         }
     }
 
@@ -362,6 +402,8 @@ where
                 &self.prologue,
                 self.dh_keys.keypair.secret(),
                 Some(&self.remote.0),
+                &self.sae_id_pqkd,
+                &self.addr_pqkd,
             )
             .build_initiator()?;
 
@@ -384,7 +426,7 @@ pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
-    Noise(#[from] snow::Error),
+    Noise(#[from] hswp::Error),
     #[error("Invalid public key")]
     InvalidKey(#[from] libp2p_identity::DecodingError),
     #[error("Only keys of length 32 bytes are supported")]
@@ -512,13 +554,31 @@ where
     type Future = BoxFuture<'static, Result<(RemoteIdentity<C>, Output<T>), Error>>;
 
     fn upgrade_inbound(self, socket: T, _: Self::Info) -> Self::Future {
+        test!("_____________________________________________");
+        test!("INBOUND --START--");
         async move {
             let mut state = self.into_responder(socket)?;
 
+            test!("1. recv_empty");
             handshake::recv_empty(&mut state).await?;
+
+            test!("enk_key");
+            handshake::enc_key(&mut state).await?;
+            test!("2. send_empty");
+            handshake::send_empty(&mut state).await?;
+
+            test!("3. recv_empty");
+            handshake::recv_empty(&mut state).await?;
+            test!("dec_key");
+            handshake::dec_key(&mut state).await?;
+
+            test!("4. send_identity");
             handshake::send_identity(&mut state).await?;
+
+            test!("5. recv_identity");
             handshake::recv_identity(&mut state).await?;
 
+            test!("4. finish");
             state.finish()
         }
         .boxed()
@@ -549,13 +609,31 @@ where
     type Future = BoxFuture<'static, Result<(RemoteIdentity<C>, Output<T>), Error>>;
 
     fn upgrade_outbound(self, socket: T, _: Self::Info) -> Self::Future {
+        test!("_____________________________________________");
+        test!("OUTBOUND --START--");
         async move {
             let mut state = self.into_initiator(socket)?;
 
+            test!("1. send_empty");
             handshake::send_empty(&mut state).await?;
+
+            test!("2. recv_empty");
+            handshake::recv_empty(&mut state).await?;
+
+            test!("dec_key");
+            handshake::dec_key(&mut state).await?;
+            test!("enc_key");
+            handshake::enc_key(&mut state).await?;
+            test!("3. send_empty");
+            handshake::send_empty(&mut state).await?;
+
+            test!("4. recv_identity");
             handshake::recv_identity(&mut state).await?;
+
+            test!("5. recv_identity");
             handshake::send_identity(&mut state).await?;
 
+            test!("4. finish");
             state.finish()
         }
         .boxed()
@@ -657,10 +735,14 @@ impl NoiseAuthenticated<XX, X25519Spec, ()> {
     ///
     /// For now, this is the only combination that is guaranteed to be compatible with other libp2p implementations.
     #[deprecated(note = "Use `libp2p_noise::Config::new` instead.")]
-    pub fn xx(id_keys: &identity::Keypair) -> Result<Self, Error> {
+    pub fn xx(
+        id_keys: &identity::Keypair,
+        sae_id_pqkd: &str,
+        addr_pqkd: &str,
+    ) -> Result<Self, Error> {
         let dh_keys = Keypair::<X25519Spec>::new();
         let noise_keys = dh_keys.into_authentic(id_keys)?;
-        let config = NoiseConfig::xx(noise_keys);
+        let config = NoiseConfig::xx(noise_keys, sae_id_pqkd, addr_pqkd);
 
         Ok(config.into_authenticated())
     }

@@ -26,6 +26,7 @@ use bytes::Bytes;
 use framed::{NoiseFramed, MAX_FRAME_LEN};
 use futures::prelude::*;
 use futures::ready;
+use hswp as snow;
 use log::trace;
 use std::{
     cmp::min,
