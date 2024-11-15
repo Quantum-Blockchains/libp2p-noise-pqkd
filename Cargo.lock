@@ -1493,7 +1493,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "libp2p-noise"
+name = "libp2p-noise-pqkd"
 version = "0.42.2"
 dependencies = [
  "async-io 1.13.0",

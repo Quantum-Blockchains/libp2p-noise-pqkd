@@ -1,5 +1,5 @@
 [package]
-name = "libp2p-noise"
+name = "libp2p-noise-pqkd"
 edition = "2021"
 rust-version = "1.60.0"
 description = "Cryptographic handshake protocol using the noise framework."
